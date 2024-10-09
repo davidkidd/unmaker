@@ -6,12 +6,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-#define USAGE "Usage:\n"                                                    \
-              "\t%s                    Build default settings.\n"           \
-              "\t%s <target_binary>    Build alternative target binary.\n"  \
-              "\t%s -init              Initialize the project directory.\n" \
-              "\t%s -run               Build default settings and run.\n"   \
-              "\t%s -clean             Clean build directories.\n"
 
 // Default build name
 #define TARGET "build"
@@ -40,6 +34,16 @@
 // Name of this source file, used to check if rebuild is required
 #define UNMAKER_SRC "unmaker.c"
 
+void print_usage(char *exec_name){
+  char * usage_string = "Usage:"\
+    "\t%s                    Build default settings.\n"           \
+    "\t%s <target_binary>    Build alternative target binary.\n"  \
+    "\t%s -init              Initialize the project directory.\n" \
+    "\t%s -run               Build default settings and run.\n"   \
+    "\t%s -clean             Clean build directories.\n"          \
+    "\t%s -usage             This message.\n";
+  printf(usage_string, exec_name, exec_name, exec_name, exec_name, exec_name, exec_name);
+}
 int file_newer(char* a_file, char* b_file);
 int try_rebuild_self(char *argv[]);
 
@@ -49,8 +53,8 @@ int main(int argc, char *argv[]) {
     }
 
     if (argc > 2) {
-        fprintf(stderr, USAGE, argv[0], argv[0], argv[0], argv[0], argv[0]);
-        return EXIT_FAILURE;
+      print_usage(argv[0]);
+      return EXIT_FAILURE;
     }
 
     char *target_binary_input = NULL;
@@ -65,9 +69,20 @@ int main(int argc, char *argv[]) {
             run = 1;
         } else if (strcmp(argv[i], "-init") == 0) {
             init = 1;
+        } else if (strcmp(argv[i], "-usage") == 0) {
+	  print_usage(argv[0]);
+	  return EXIT_SUCCESS;
         } else {
             target_binary_input = argv[i];
         }
+    }
+
+    // Check out input name in case of an error
+    if (target_binary_input != NULL && strncmp(target_binary_input, "-", 1) == 0)
+    {
+      fprintf(stderr, "Unknown flag or malformed build target: %s", target_binary_input);
+      print_usage(argv[0]);
+      return EXIT_FAILURE;
     }
 
     // Directories to create
@@ -109,7 +124,6 @@ int main(int argc, char *argv[]) {
         target_binary_input = TARGET;
         printf("Target binary: %s\n", target_binary_input);
     }
-
     char target_binary[256];
     snprintf(target_binary, sizeof(target_binary), "%s/%s", BIN_DIR, target_binary_input);
 
@@ -190,7 +204,7 @@ int main(int argc, char *argv[]) {
     printf("Success: Executable created at %s\n", target_binary);
 
     if (run) {
-        printf("Executing: %s\n", target_binary);
+        printf("Executing: %s\n--- RUN OUTPUT ---\n", target_binary);
         char run_cmd[512] = "./";
         strcat(run_cmd, target_binary);
         if (system(run_cmd) != 0) {
