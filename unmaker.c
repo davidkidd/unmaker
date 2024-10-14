@@ -6,11 +6,10 @@
 #include <errno.h>
 #include <unistd.h>
 
-
 // Default build name
 #define TARGET "build"
 
-// Default compiler and linker commands
+// Default compiler and linker commands for target
 #define COMPILER "cc"
 #define LINKER "cc"
 
@@ -25,14 +24,22 @@
 // Compiler commands
 #define CFLAGS "-Wall"
 #define INCLUDE "-Iinclude"
+
+// Linker commands
 #define LIB_FLAGS ""
 #define LIB_PATHS ""
 
 // System command invoked on clean
 #define CLEAN_CMD "rm -rf"
 
-// Name of this source file, used to check if rebuild is required
+// Run command prefix.
+// Remember to include space if required.
+#define RUN_CMD_PREFIX "./"
+
+// Name of this source file, used to check if rebuild is required.
+// Leave blank to turn off self-rebuilding.
 #define UNMAKER_SRC "unmaker.c"
+#define UNMAKER_CC "cc"
 
 void print_usage(char *exec_name){
   char * usage_string = "Usage:"\
@@ -44,7 +51,9 @@ void print_usage(char *exec_name){
     "\t%s -usage             This message.\n";
   printf(usage_string, exec_name, exec_name, exec_name, exec_name, exec_name, exec_name);
 }
+
 int file_newer(char* a_file, char* b_file);
+
 int try_rebuild_self(char *argv[]);
 
 int main(int argc, char *argv[]) {
@@ -205,7 +214,7 @@ int main(int argc, char *argv[]) {
 
     if (run) {
         printf("Executing: %s\n--- RUN OUTPUT ---\n", target_binary);
-        char run_cmd[512] = "./";
+        char run_cmd[512] = RUN_CMD_PREFIX; 
         strcat(run_cmd, target_binary);
         if (system(run_cmd) != 0) {
             fprintf(stderr, "Execution failed for %s\n", target_binary);
@@ -238,10 +247,16 @@ int file_newer(char* a_file, char* b_file) {
 
 int try_rebuild_self(char *argv[]) {
     char* unmaker_src = UNMAKER_SRC;
+    if (strlen(unmaker_src) == 0){
+      return EXIT_SUCCESS;
+
+    }
+    
     if (file_newer(unmaker_src, argv[0])) {
-        char rebuild_cmd[256];
+      char rebuild_cmd[256] = UNMAKER_CC;
         snprintf(rebuild_cmd, sizeof(rebuild_cmd),
-                 "cc %s -o %s",
+                 "%s %s -o %s",
+		 UNMAKER_CC,
                  unmaker_src, argv[0]);
 
         printf("Rebuilding: %s\n", rebuild_cmd);
