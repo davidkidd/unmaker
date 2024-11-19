@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     // Check out input name in case of an error
     if (target_binary_input != NULL && strncmp(target_binary_input, "-", 1) == 0)
     {
-      fprintf(stderr, "Unknown flag or malformed build target: %s", target_binary_input);
+      fprintf(stderr, "Unknown flag or malformed build target: %s\n", target_binary_input);
       print_usage(argv[0]);
       return EXIT_FAILURE;
     }
