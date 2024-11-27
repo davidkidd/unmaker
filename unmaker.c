@@ -32,9 +32,11 @@
 // System command invoked on clean
 #define CLEAN_CMD "rm -rf"
 
-// Run command prefix.
+// Run command options.
+// Executes this format: RUN_CMD_PREFIX+BUILD_NAME+RUN_CMD_SUFFIX
 // Remember to include space if required.
 #define RUN_CMD_PREFIX "./"
+#define RUN_CMD_SUFFIX ""
 
 // Name of this source file, used to check if rebuild is required.
 // Leave blank to turn off self-rebuilding.
@@ -213,9 +215,10 @@ int main(int argc, char *argv[]) {
     printf("Success: Executable created at %s\n", target_binary);
 
     if (run) {
-        printf("Executing: %s\n--- RUN OUTPUT ---\n", target_binary);
         char run_cmd[512] = RUN_CMD_PREFIX; 
         strcat(run_cmd, target_binary);
+	strcat(run_cmd, RUN_CMD_SUFFIX);
+        printf("Executing: %s\n--- RUN OUTPUT ---\n", run_cmd);
         if (system(run_cmd) != 0) {
             fprintf(stderr, "Execution failed for %s\n", target_binary);
             return EXIT_FAILURE;
