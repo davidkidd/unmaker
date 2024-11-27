@@ -169,8 +169,8 @@ int main(int argc, char *argv[]) {
                 if (file_newer(source_path, object_path)) {
                     // Compile the source file into object file
                     char compile_cmd[2048];
-                    snprintf(compile_cmd, sizeof(compile_cmd), "%s %s -c %s -o %s",
-                             COMPILER, CFLAGS, source_path, object_path);
+                    snprintf(compile_cmd, sizeof(compile_cmd), "%s %s %s -c %s -o %s",
+                             COMPILER, CFLAGS, INCLUDE, source_path, object_path);
                     printf("Compiling: %s\n", compile_cmd);
                     if (system(compile_cmd) != 0) {
                         fprintf(stderr, "Compilation failed for %s\n", source_path);
