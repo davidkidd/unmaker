@@ -17,17 +17,31 @@
 #define SRC_DIR "src"
 #define SRC_EXT ".c"
 
+// Default include folder
+#define INC_DIR "include"
+
 // Object and bin folders, flushed on clean
 #define OBJ_DIR "obj"
 #define BIN_DIR "bin"
 
 // Compiler commands
 #define CFLAGS "-Wall"
-#define INCLUDE "-Iinclude"
+#define INCLUDE "-I" INC_DIR
 
 // Linker commands
+// Default project lib folder.
+// Also used for setting rpath
+#define LIB_DIR "libs"
 #define LIB_FLAGS ""
-#define LIB_PATHS ""
+#define LD_FLAGS "-L" LIB_DIR
+
+// rpath will set the inital search path
+// for libraries, relative to the executable
+#define R_PATH "-Wl,-rpath='$ORIGIN/" LIB_DIR "'"
+
+// lib copy after build
+#define BIN_LIB_DIR BIN_DIR "/" LIB_DIR
+#define LIB_COPY_CMD "cp -u " LIB_DIR "/* " BIN_LIB_DIR
 
 // System command invoked on clean
 #define CLEAN_CMD "rm -rf"
@@ -35,6 +49,7 @@
 // Run command options.
 // Executes this format: RUN_CMD_PREFIX+BUILD_NAME+RUN_CMD_SUFFIX
 // Remember to include space if required.
+// Also, remember that the CWD is where unmaker is executed from.
 #define RUN_CMD_PREFIX "./"
 #define RUN_CMD_SUFFIX ""
 
@@ -46,7 +61,6 @@
 void print_usage(char *exec_name){
   char * usage_string = "Usage:"\
     "\t%s                    Build default settings.\n"           \
-    "\t%s <target_binary>    Build alternative target binary.\n"  \
     "\t%s -init              Initialize the project directory.\n" \
     "\t%s -run               Build default settings and run.\n"   \
     "\t%s -clean             Clean build directories.\n"          \
@@ -58,6 +72,8 @@ int file_newer(char* a_file, char* b_file);
 
 int try_rebuild_self(char *argv[]);
 
+int try_copy_all_library_files();
+
 int main(int argc, char *argv[]) {
     if (try_rebuild_self(argv) == EXIT_FAILURE) {
         return EXIT_FAILURE;
@@ -68,36 +84,30 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
 
-    char *target_binary_input = NULL;
+
     int clean = 0;
     int init = 0;
     int run = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-clean") == 0) {
-            clean = 1;
-        } else if (strcmp(argv[i], "-run") == 0) {
-            run = 1;
-        } else if (strcmp(argv[i], "-init") == 0) {
-            init = 1;
-        } else if (strcmp(argv[i], "-usage") == 0) {
-	  print_usage(argv[0]);
-	  return EXIT_SUCCESS;
-        } else {
-            target_binary_input = argv[i];
-        }
-    }
-
-    // Check out input name in case of an error
-    if (target_binary_input != NULL && strncmp(target_binary_input, "-", 1) == 0)
-    {
-      fprintf(stderr, "Unknown flag or malformed build target: %s\n", target_binary_input);
-      print_usage(argv[0]);
-      return EXIT_FAILURE;
+      if (strcmp(argv[i], "-clean") == 0) {
+        clean = 1;
+      } else if (strcmp(argv[i], "-run") == 0) {
+        run = 1;
+      } else if (strcmp(argv[i], "-init") == 0) {
+        init = 1;
+      } else if (strcmp(argv[i], "-usage") == 0) {
+        print_usage(argv[0]);
+        return EXIT_SUCCESS;
+      } else {
+        fprintf(stderr, "Unknown flag: %s\n", argv[i]);
+        print_usage(argv[0]);
+        return EXIT_FAILURE;
+      }
     }
 
     // Directories to create
-    const char *dirs_to_make[] = {SRC_DIR, OBJ_DIR, BIN_DIR};
+    const char *dirs_to_make[] = {SRC_DIR, OBJ_DIR, BIN_DIR, INC_DIR, BIN_LIB_DIR, LIB_DIR};
     const size_t num_dirs = sizeof(dirs_to_make) / sizeof(dirs_to_make[0]);
 
     // Clean directories if requested
@@ -131,10 +141,13 @@ int main(int argc, char *argv[]) {
     }
 
     // Determine target binary
+    char *target_binary_input = TARGET;
     if (target_binary_input == NULL) {
-        target_binary_input = TARGET;
-        printf("Target binary: %s\n", target_binary_input);
+	fprintf(stderr, "No target binary specified");
+	return EXIT_FAILURE;
     }
+    
+    printf("Target binary: %s\n", target_binary_input);
     char target_binary[256];
     snprintf(target_binary, sizeof(target_binary), "%s/%s", BIN_DIR, target_binary_input);
 
@@ -194,12 +207,13 @@ int main(int argc, char *argv[]) {
     // Construct the linking command
     char link_cmd[8192];
     int link_cmd_status = snprintf(link_cmd, sizeof(link_cmd),
-                                   "%s %s -o %s %s %s",
+                                   "%s %s -o %s %s %s %s",
                                    LINKER,
                                    object_files,
                                    target_binary,
                                    LIB_FLAGS,
-                                   LIB_PATHS);
+                                   LD_FLAGS,
+				   R_PATH);
 
     if (link_cmd_status < 0 || link_cmd_status >= (int)sizeof(link_cmd)) {
         perror("Linking command construction failed");
@@ -210,6 +224,11 @@ int main(int argc, char *argv[]) {
     if (system(link_cmd) != 0) {
         fprintf(stderr, "Linking failed\n");
         return EXIT_FAILURE;
+    }
+
+    printf("Copying libraries: %s\n", LIB_COPY_CMD);
+    if (try_copy_all_library_files() == EXIT_FAILURE) {
+        fprintf(stderr, "Some or all library files could not be copied)");
     }
 
     printf("Success: Executable created at %s\n", target_binary);
@@ -282,3 +301,40 @@ int try_rebuild_self(char *argv[]) {
 
     return EXIT_SUCCESS;
 } 
+
+int try_copy_all_library_files() {
+    // First check the directory exists
+    DIR *d;
+    struct dirent *dir;
+    int files_exist = 0;
+
+    d = opendir(LIB_DIR);
+    if (d) {
+	// Roll through the files until we find
+	// a regular file.
+	while ((dir = readdir(d)) != NULL) {
+	    if (dir->d_type == DT_REG) {
+		files_exist = 1;
+		break;
+	    }
+	}
+	closedir(d);
+    }
+    else {
+	perror("LIB_DIR not found");
+	return EXIT_FAILURE;
+    }
+	
+    if (files_exist) {
+	fprintf(stdout, "Copying files from %s to %s\n", LIB_DIR, BIN_LIB_DIR);
+	if (system(LIB_COPY_CMD) != 0) {
+	    fprintf(stderr, "Copying failed\n");
+	    return EXIT_FAILURE;
+	}
+    }
+    else {
+	fprintf(stdout, "Nothing to copy\n");
+    }
+	    
+    return EXIT_SUCCESS;
+}
