@@ -31,7 +31,7 @@
 // Linker commands
 // Default project lib folder.
 // Also used for setting rpath
-#define LIB_DIR "libs"
+#define LIB_DIR "lib"
 #define LIB_FLAGS ""
 #define LD_FLAGS "-L" LIB_DIR
 
@@ -275,7 +275,7 @@ int try_rebuild_self(char *argv[]) {
     }
     
     if (file_newer(unmaker_src, argv[0])) {
-      char rebuild_cmd[256] = UNMAKER_CC;
+	char rebuild_cmd[256] = UNMAKER_CC;
         snprintf(rebuild_cmd, sizeof(rebuild_cmd),
                  "%s %s -o %s",
 		 UNMAKER_CC,
