@@ -69,6 +69,7 @@ void print_usage(char *exec_name) {
       "\t%s -init              Initialize the project directory.\n"
       "\t%s -run               Build default settings and run.\n"
       "\t%s -clean             Clean build directories.\n"
+      "\t%s -full              Clean, build and run.\n"
       "\t%s -usage             This message.\n";
   printf(usage_string, exec_name, exec_name, exec_name, exec_name, exec_name);
 }
@@ -88,6 +89,7 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
+  int build = argc == 1 ? 1 : 0; // assume args do not build
   int clean = 0;
   int init = 0;
   int run = 0;
@@ -97,8 +99,13 @@ int main(int argc, char *argv[]) {
       clean = 1;
     } else if (strcmp(argv[i], "-run") == 0) {
       run = 1;
+      build = 1;      
     } else if (strcmp(argv[i], "-init") == 0) {
       init = 1;
+    } else if (strcmp(argv[i], "-full") == 0) {
+      clean = 1;
+      build = 1;
+      run = 1;
     } else if (strcmp(argv[i], "-usage") == 0) {
       print_usage(argv[0]);
       return EXIT_SUCCESS;
@@ -153,7 +160,7 @@ int main(int argc, char *argv[]) {
   }
 
   // If initializing or cleaning, exit
-  if (init || clean) {
+  if (build == 0) {
     return EXIT_SUCCESS;
   }
 
