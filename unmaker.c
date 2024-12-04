@@ -46,6 +46,9 @@
 // System command invoked on clean
 #define CLEAN_CMD "rm -rf"
 
+// Additional command invoked after -init
+#define EXTRA_INIT "git init"
+
 // Run command options.
 // Executes this format: RUN_CMD_PREFIX+BUILD_NAME+RUN_CMD_SUFFIX
 // Remember to include space if required.
@@ -133,6 +136,19 @@ int main(int argc, char *argv[]) {
             perror("mkdir failed");
             return EXIT_FAILURE;
         }
+    }
+
+    if (init) {
+	char *init_cmd = EXTRA_INIT;
+	if (init_cmd == NULL || strlen(init_cmd) == 0) {
+	    fprintf(stdout, "No additional init specified\n");
+	}
+	else {
+	    fprintf(stdout, "Additional init: %s\n", init_cmd);
+	    if (system(init_cmd) != 0) {
+		perror("init failed");
+	    }
+	}
     }
 
     // If initializing or cleaning, exit
