@@ -6,21 +6,20 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// Default build name
+// Build name
 #define TARGET "build"
 
-// Default compiler and linker commands for target
+// Compiler and linker commands for target
 #define COMPILER "cc"
 #define LINKER "cc"
 
-// Default source folder and extension
+// Source folder and extension
 #define SRC_DIR "src"
 #define SRC_EXT ".c"
 
-// Default include folder
+// Include, object and bin folders.
+// Object and bin folders are flushed on clean.
 #define INC_DIR "include"
-
-// Object and bin folders, flushed on clean
 #define OBJ_DIR "obj"
 #define BIN_DIR "bin"
 
@@ -29,14 +28,11 @@
 #define INCLUDE "-I" INC_DIR
 
 // Linker commands
-// Default project lib folder.
-// Also used for setting rpath
 #define LIB_DIR "lib"
 #define LIB_FLAGS ""
 #define LD_FLAGS "-L" LIB_DIR
 
-// rpath will set the inital search path
-// for libraries, relative to the executable
+// rpath will set the initial search path
 #define R_PATH "-Wl,-rpath='$ORIGIN/" LIB_DIR "'"
 
 // lib copy after build
@@ -50,16 +46,21 @@
 #define EXTRA_INIT "git init"
 
 // Run command options.
-// Executes this format: RUN_CMD_PREFIX+BUILD_NAME+RUN_CMD_SUFFIX
-// Remember to include space if required.
-// Also, remember that the CWD is where unmaker is executed from.
 #define RUN_CMD_PREFIX "./"
 #define RUN_CMD_SUFFIX ""
 
 // Name of this source file, used to check if rebuild is required.
-// Leave blank to turn off self-rebuilding.
 #define UNMAKER_SRC "unmaker.c"
 #define UNMAKER_CC "cc"
+
+// Set to 1 to create a compile_commands.json
+#define EXPORT_COMPILE_COMMANDS 1
+
+#if EXPORT_COMPILE_COMMANDS
+#define MAX_COMMANDS 1024
+char compile_commands[MAX_COMMANDS][1024];
+int command_count = 0;
+#endif
 
 void print_usage(char *exec_name) {
   char *usage_string =
@@ -69,15 +70,13 @@ void print_usage(char *exec_name) {
       "\t%s -run               Build default settings and run.\n"
       "\t%s -clean             Clean build directories.\n"
       "\t%s -usage             This message.\n";
-  printf(usage_string, exec_name, exec_name, exec_name, exec_name, exec_name,
-         exec_name);
+  printf(usage_string, exec_name, exec_name, exec_name, exec_name, exec_name);
 }
 
 int file_newer(char *a_file, char *b_file);
-
 int try_rebuild_self(char *argv[]);
-
 int try_copy_all_library_files();
+void write_compile_commands();
 
 int main(int argc, char *argv[]) {
   if (try_rebuild_self(argv) == EXIT_FAILURE) {
@@ -213,6 +212,15 @@ int main(int argc, char *argv[]) {
             closedir(dir);
             return EXIT_FAILURE;
           }
+
+#if EXPORT_COMPILE_COMMANDS
+          // Add to compile_commands
+          if (command_count < MAX_COMMANDS) {
+            strncpy(compile_commands[command_count], compile_cmd, 1023);
+            compile_commands[command_count][1023] = '\0';
+            command_count++;
+          }
+#endif
         } else {
           printf("Skipping (up-to-date): %s\n", source_path);
         }
@@ -224,6 +232,11 @@ int main(int argc, char *argv[]) {
     }
   }
   closedir(dir);
+
+#if EXPORT_COMPILE_COMMANDS
+  // Write compile_commands.json
+  write_compile_commands();
+#endif
 
   // Construct the linking command
   char link_cmd[8192];
@@ -290,7 +303,7 @@ int try_rebuild_self(char *argv[]) {
   }
 
   if (file_newer(unmaker_src, argv[0])) {
-    char rebuild_cmd[256] = UNMAKER_CC;
+    char rebuild_cmd[256];
     snprintf(rebuild_cmd, sizeof(rebuild_cmd), "%s %s -o %s", UNMAKER_CC,
              unmaker_src, argv[0]);
 
@@ -349,3 +362,41 @@ int try_copy_all_library_files() {
 
   return EXIT_SUCCESS;
 }
+
+
+#if EXPORT_COMPILE_COMMANDS
+void write_compile_commands() {
+  // Buffer to store the current working directory
+  char cwd[PATH_MAX];
+
+  // Retrieve the current working directory
+  if (getcwd(cwd, sizeof(cwd)) == NULL) {
+    perror("getcwd() error");
+    return;
+  }
+
+  FILE *f = fopen("compile_commands.json", "w");
+  if (!f) {
+    perror("Failed to create compile_commands.json");
+    return;
+  }
+  fprintf(f, "[\n");
+  for (int i = 0; i < command_count; i++) {
+    fprintf(f, "  {\n");
+    fprintf(f, "    \"directory\": \"%s\",\n", cwd);
+    fprintf(f, "    \"command\": \"%s\",\n", compile_commands[i]);
+    // Extract source file from command
+    char *file = strstr(compile_commands[i], SRC_DIR);
+    char *end = strchr(file, ' ');
+    if (end)
+      *end = '\0';
+    fprintf(f, "    \"file\": \"%s\"\n", file);
+    if (i < command_count - 1)
+      fprintf(f, "  },\n");
+    else
+      fprintf(f, "  }\n");
+  }
+  fprintf(f, "]\n");
+  fclose(f);
+}
+#endif
