@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
       clean = 1;
     } else if (strcmp(argv[i], "-run") == 0) {
       run = 1;
-      build = 1;      
+      build = 1;
     } else if (strcmp(argv[i], "-init") == 0) {
       init = 1;
     } else if (strcmp(argv[i], "-full") == 0) {
@@ -206,13 +206,15 @@ int main(int argc, char *argv[]) {
         char object_path[512];
         snprintf(object_path, sizeof(object_path), "%s/%s.o", OBJ_DIR,
                  base_name);
-
+        
+        // Compile the source file into object file
+        char compile_cmd[2048];
+        snprintf(compile_cmd, sizeof(compile_cmd), "%s %s %s -c %s -o %s",
+                 COMPILER, CFLAGS, INCLUDE, source_path, object_path);
+        
         // Check if recompilation is needed
         if (file_newer(source_path, object_path)) {
-          // Compile the source file into object file
-          char compile_cmd[2048];
-          snprintf(compile_cmd, sizeof(compile_cmd), "%s %s %s -c %s -o %s",
-                   COMPILER, CFLAGS, INCLUDE, source_path, object_path);
+
           printf("Compiling: %s\n", compile_cmd);
           if (system(compile_cmd) != 0) {
             fprintf(stderr, "Compilation failed for %s\n", source_path);
@@ -220,18 +222,17 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
           }
 
-#if EXPORT_COMPILE_COMMANDS
-          // Add to compile_commands
-          if (command_count < MAX_COMMANDS) {
-            strncpy(compile_commands[command_count], compile_cmd, 1023);
-            compile_commands[command_count][1023] = '\0';
-            command_count++;
-          }
-#endif
         } else {
           printf("Skipping (up-to-date): %s\n", source_path);
         }
-
+#if EXPORT_COMPILE_COMMANDS
+        // Add to compile_commands
+        if (command_count < MAX_COMMANDS) {
+          strncpy(compile_commands[command_count], compile_cmd, 1023);
+          compile_commands[command_count][1023] = '\0';
+          command_count++;
+        }
+#endif
         // Append the object file path to the object_files string
         strcat(object_files, object_path);
         strcat(object_files, " ");
@@ -369,7 +370,6 @@ int try_copy_all_library_files() {
 
   return EXIT_SUCCESS;
 }
-
 
 #if EXPORT_COMPILE_COMMANDS
 void write_compile_commands() {
