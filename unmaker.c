@@ -51,7 +51,7 @@
 
 // Name of this source file, used to check if rebuild is required.
 #define UNMAKER_SRC "unmaker.c"
-#define UNMAKER_CC "cc"
+#define UNMAKER_CC "cc"    
 
 // Set to 1 to create a compile_commands.json
 #define EXPORT_COMPILE_COMMANDS 1
@@ -62,18 +62,16 @@ char compile_commands[MAX_COMMANDS][1024];
 int command_count = 0;
 #endif
 
-void print_usage(char *exec_name) {
-  char *usage_string =
-      "Usage:"
-      "\t%s                    Build default settings.\n"
-      "\t%s -init              Initialize the project directory.\n"
-      "\t%s -run               Build default settings and run.\n"
-      "\t%s -clean             Clean build directories.\n"
-      "\t%s -full              Clean, build and run.\n"
-      "\t%s -usage             This message.\n";
-  printf(usage_string, exec_name, exec_name, exec_name, exec_name, exec_name);
-}
+const char *options[][2] = {
+        {"",        "Build default settings."},
+        {"-clean",  "Clean build directories."},
+        {"-full",   "Clean, build and run."},
+        {"-init",   "Initialize the project directory."},
+        {"-run",    "Build default settings and run."},
+        {"-usage",  "Display this usage message."}
+};
 
+void print_usage(char *exec_name);
 int file_newer(char *a_file, char *b_file);
 int try_rebuild_self(char *argv[]);
 int try_copy_all_library_files();
@@ -91,7 +89,7 @@ int main(int argc, char *argv[]) {
 
   int build = argc == 1 ? 1 : 0; // assume args do not build
   int clean = 0;
-  int init = 0;
+  int init = 0; 
   int run = 0;
 
   for (int i = 1; i < argc; i++) {
@@ -369,6 +367,36 @@ int try_copy_all_library_files() {
   }
 
   return EXIT_SUCCESS;
+}
+
+void print_usage(char *exec_name) {
+  int num_options = sizeof(options) / sizeof(options[0]);
+
+  size_t max_command_length = strlen(exec_name);
+  for (int i = 0; i < num_options; i++){
+    size_t current = strlen(exec_name);
+    if (strlen(options[i][0]) > 0) {
+      current += 1 + strlen(options[i][0]);
+    }
+
+    if (current > max_command_length)
+      max_command_length = current;
+  }
+  
+  int padding = max_command_length + 4;
+
+  
+  fprintf(stdout, "Usage:\n");
+  for (int i = 0; i < num_options; i++) {
+    char command[256];
+    if (strlen(options[i][0]) == 0) {
+      snprintf(command, sizeof(command), "%s", exec_name);
+    } else {
+      snprintf(command, sizeof(command), "%s %s", exec_name, options[i][0]);
+    }
+
+    fprintf(stdout, "  %-*s %s\n", (int)padding, command, options[i][1]);
+  }
 }
 
 #if EXPORT_COMPILE_COMMANDS
