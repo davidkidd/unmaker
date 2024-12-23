@@ -26,7 +26,7 @@
 
 // Compiler commands
 #define CFLAGS "-Wall"
-#define INCLUDE "-I"
+#define INCLUDE "-I" INC_DIR
 
 // Linker commands
 #define LIB_DIR "lib"
@@ -68,7 +68,7 @@ const char *options[][2] = {{"", "Build default settings."},
                             {"-full", "Clean, build and run."},
                             {"-init", "Initialize the project directory."},
                             {"-run", "Build default settings and run."},
-                            {"-usage", "Display this usage message."}};
+                            {"-h, -help", "Display this usage message."}};
 
 void print_usage(char *exec_name);
 int file_newer(char *a_file, char *b_file);
@@ -121,7 +121,8 @@ int main(int argc, char *argv[]) {
       clean = 1;
       build = 1;
       run = 1;
-    } else if (strcmp(argv[i], "-usage") == 0) {
+    } else if (strcmp(argv[i], "-h") == 0 ||
+               strcmp(argv[i], "-help") == 0){
       print_usage(argv[0]);
       return clean_exit(EXIT_SUCCESS);
     } else {
@@ -428,18 +429,14 @@ void print_usage(char *exec_name) {
   }
 
   int padding = max_command_length + 4;
-
-  fprintf(stdout, "Usage:\n");
-  for (int i = 0; i < num_options; i++) {
-    char command[256];
-    if (strlen(options[i][0]) == 0) {
-      snprintf(command, sizeof(command), "%s", exec_name);
-    } else {
-      snprintf(command, sizeof(command), "%s %s", exec_name, options[i][0]);
-    }
-
-    fprintf(stdout, "  %-*s %s\n", (int)padding, command, options[i][1]);
+  struct Sb *sb = string_sb_create(256);
+  string_sb_append_f(sb, "Usage:\n");
+  for (size_t i = 0; i < (num_options); i++) {
+    string_sb_append_f(sb, " %s %-*s %s\n", exec_name, padding, options[i][0],
+                       options[i][1]);
   }
+  fprintf(stdout, "%s", string_sb_get(sb));
+  // Don't free sb - it is cleaned up on exit
 }
 
 #if EXPORT_COMPILE_COMMANDS
