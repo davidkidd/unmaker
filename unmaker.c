@@ -4,8 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <limits.h>
 
 // Build name
 #define TARGET "build"
@@ -57,275 +58,252 @@
 // Set to 1 to create a compile_commands.json
 #define EXPORT_COMPILE_COMMANDS 1
 
+#define EXPORT_COMPILE_COMMANDS 1
+
+// globals
+
 #if EXPORT_COMPILE_COMMANDS
-char **compile_commands = NULL;
-int compile_commands_count = 0;
-int compile_commands_capacity = 16;
+char **compile_commands          = NULL;
+int    compile_commands_count    = 0;
+int    compile_commands_capacity = 16;
 #endif
 
-const char *options[][2] = {{"", "Build default settings."},
-                            {"-clean", "Clean build directories."},
-                            {"-full", "Clean, build and run."},
-                            {"-init", "Initialize the project directory."},
-                            {"-run", "Build default settings and run."},
-                            {"-h, -help", "Display this usage message."}};
-
-void print_usage(char *exec_name);
-int file_newer(char *a_file, char *b_file);
-int try_rebuild_self(char *argv[]);
-int try_copy_all_library_files();
-void write_compile_commands();
-int clean_exit(int code);
-
-// Stringbuilder functions
-struct Sb {
-  char *str;
-  size_t length;
-  size_t capacity;
+static const char *options[][2] = {
+    {"",          "Build default settings."},
+    {"-clean",    "Clean build directories."},
+    {"-full",     "Clean, build and run."},
+    {"-init",     "Initialize the project directory."},
+    {"-run",      "Build default settings and run."},
+    {"-h, -help", "Display this usage message."}
 };
-struct Sb
-    *string_builders[10]; // store the pointers to the sbs for freeing on exit
-int sb_count = 0;
-char *string_sb_copy(const struct Sb *sb);
-struct Sb *string_sb_create(size_t capacity);
-int string_sb_append_f(struct Sb *sb, const char *fmt, ...);
-int string_sb_append(struct Sb *sb, const char *str);
-const char *string_sb_get(const struct Sb *sb);
-void string_sb_clear(struct Sb *sb);
-void string_sb_free(struct Sb **sb);
 
-int main(int argc, char *argv[]) {
-  if (try_rebuild_self(argv) == EXIT_FAILURE) {
-    return clean_exit(EXIT_FAILURE);
-  }
+// forward declarations
 
-  if (argc > 2) {
-    print_usage(argv[0]);
-    return clean_exit(EXIT_FAILURE);
-  }
+void  print_usage(char *exec_name);
+int   file_newer(char *a_file, char *b_file);
+int   needs_rebuild(const char *obj, const char *dep);      /* NEW */
+int   try_rebuild_self(char *argv[]);
+int   try_copy_all_library_files(void);
+void  write_compile_commands(void);
+int   clean_exit(int code);
 
-  int build = argc == 1 ? 1 : 0; // assume args do not build
-  int clean = 0;
-  int init = 0;
-  int run = 0;
+// simple string builder
 
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-clean") == 0) {
-      clean = 1;
-    } else if (strcmp(argv[i], "-run") == 0) {
-      run = 1;
-      build = 1;
-    } else if (strcmp(argv[i], "-init") == 0) {
-      init = 1;
-    } else if (strcmp(argv[i], "-full") == 0) {
-      clean = 1;
-      build = 1;
-      run = 1;
-    } else if (strcmp(argv[i], "-h") == 0 ||
-               strcmp(argv[i], "-help") == 0){
-      print_usage(argv[0]);
-      return clean_exit(EXIT_SUCCESS);
-    } else {
-      fprintf(stderr, "Unknown flag: %s\n", argv[i]);
-      print_usage(argv[0]);
-      return clean_exit(EXIT_FAILURE);
-    }
-  }
+struct Sb {
+    char   *str;
+    size_t  length;
+    size_t  capacity;
+};
+static struct Sb *string_builders[10];
+static int         sb_count = 0;
 
-  // Directories to create
-  const char *dirs_to_make[] = {SRC_DIR, OBJ_DIR,     BIN_DIR,
-                                INC_DIR, BIN_LIB_DIR, LIB_DIR};
-  const size_t num_dirs = sizeof(dirs_to_make) / sizeof(dirs_to_make[0]);
+char         *string_sb_copy   (const struct Sb *sb);
+struct Sb    *string_sb_create (size_t capacity);
+int           string_sb_append_f(struct Sb *sb, const char *fmt, ...);
+int           string_sb_append (struct Sb *sb, const char *str);
+const char   *string_sb_get    (const struct Sb *sb);
+void          string_sb_clear  (struct Sb *sb);
+void          string_sb_free   (struct Sb **sb);
 
-  // Clean directories if requested
-  if (clean) {
-    struct Sb *clean_sb = string_sb_create(256);
-    string_sb_append(clean_sb, CLEAN_CMD);
-    const char *dirs_to_clean[] = {OBJ_DIR, BIN_DIR};
-    const size_t num_dirs_to_clean =
-        sizeof(dirs_to_clean) / sizeof(dirs_to_clean[0]);
-
-    if (num_dirs_to_clean > 0) {
-      for (size_t i = 0; i < num_dirs_to_clean; i++) {
-        string_sb_append_f(clean_sb, " %s", dirs_to_clean[i]);
-      }
-      printf("Cleaning: %s\n", string_sb_get(clean_sb));
-      system(string_sb_get(clean_sb));
-    }
-  }
-
-  // Create necessary directories
-  for (size_t i = 0; i < num_dirs; ++i) {
-    const char *dir = dirs_to_make[i];
-    if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
-      perror("mkdir failed");
-      return clean_exit(EXIT_FAILURE);
-    }
-  }
-
-  if (init) {
-    struct Sb *init_sb = string_sb_create(256);
-    string_sb_append(init_sb, EXTRA_INIT);
-    const char *init_cmd = string_sb_get(init_sb);
-    if (init_cmd == NULL || strlen(init_cmd) == 0) {
-      fprintf(stdout, "No additional init specified\n");
-    } else {
-      fprintf(stdout, "Additional init: %s\n", init_cmd);
-      if (system(init_cmd) != 0) {
-        perror("init failed");
+int main(int argc, char *argv[])
+{
+    if (try_rebuild_self(argv) == EXIT_FAILURE)
         return clean_exit(EXIT_FAILURE);
-      }
+
+    if (argc > 2) {
+        print_usage(argv[0]);
+        return clean_exit(EXIT_FAILURE);
     }
-  }
 
-  // If initializing or cleaning, exit
-  if (build == 0) {
-    return clean_exit(EXIT_SUCCESS);
-  }
+    int build = (argc == 1);   
+    int clean = 0, init = 0, run = 0;
 
-  // Determine target binary
-  char *target_binary_input = TARGET;
-  if (target_binary_input == NULL) {
-    fprintf(stderr, "No target binary specified\n");
-    return clean_exit(EXIT_FAILURE);
-  }
+    for (int i = 1; i < argc; ++i) {
+        if      (!strcmp(argv[i], "-clean")) clean = 1;
+        else if (!strcmp(argv[i], "-run"))   { run = 1;  build = 1; }
+        else if (!strcmp(argv[i], "-init"))  init = 1;
+        else if (!strcmp(argv[i], "-full"))  { clean = 1; build = 1; run = 1; }
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "-help")) {
+            print_usage(argv[0]);
+            return clean_exit(EXIT_SUCCESS);
+        } else {
+            fprintf(stderr, "Unknown flag: %s\n", argv[i]);
+            print_usage(argv[0]);
+            return clean_exit(EXIT_FAILURE);
+        }
+    }
 
-  printf("Target binary: %s\n", target_binary_input);
-  struct Sb *target_sb = string_sb_create(256);
-  string_sb_append_f(target_sb, "%s/%s", BIN_DIR, target_binary_input);
-  const char *target_binary = string_sb_copy(target_sb);
+    if (clean) {
+        struct Sb *clean_sb = string_sb_create(256);
+        string_sb_append(clean_sb, CLEAN_CMD);
+        const char *dirs[] = {OBJ_DIR, BIN_DIR};
+        for (size_t i = 0; i < sizeof(dirs)/sizeof(dirs[0]); ++i)
+            string_sb_append_f(clean_sb, " %s", dirs[i]);
 
-  DIR *dir;
-  struct dirent *entry;
-  dir = opendir(SRC_DIR);
-  if (dir == NULL) {
-    perror("Failed to open source directory");
-    return clean_exit(EXIT_FAILURE);
-  }
+        printf("Cleaning: %s\n", string_sb_get(clean_sb));
+        system(string_sb_get(clean_sb));
+    }
+
+    const char *dirs_to_make[] = {
+        SRC_DIR, OBJ_DIR, BIN_DIR, INC_DIR, BIN_LIB_DIR, LIB_DIR
+    };
+    for (size_t i = 0; i < sizeof(dirs_to_make)/sizeof(dirs_to_make[0]); ++i) {
+        if (mkdir(dirs_to_make[i], 0755) && errno != EEXIST) {
+            perror("mkdir failed");
+            return clean_exit(EXIT_FAILURE);
+        }
+    }
+
+    if (init) {
+        if (*EXTRA_INIT) {
+            printf("Additional init: %s\n", EXTRA_INIT);
+            if (system(EXTRA_INIT)) {
+                perror("init failed");
+                return clean_exit(EXIT_FAILURE);
+            }
+        } else {
+            puts("No additional init specified");
+        }
+    }
+
+    if (!build) return clean_exit(EXIT_SUCCESS);
+
+    struct Sb *target_sb = string_sb_create(256);
+    string_sb_append_f(target_sb, "%s/%s", BIN_DIR, TARGET);
+    const char *target_binary = string_sb_copy(target_sb);
+    printf("Target binary: %s\n", target_binary);
+
+    DIR *src_dir = opendir(SRC_DIR);
+    if (!src_dir) { perror("open src"); return clean_exit(EXIT_FAILURE); }
 
 #if EXPORT_COMPILE_COMMANDS
-  compile_commands = malloc(sizeof(char *) * compile_commands_capacity);
-  if (!compile_commands) {
-    perror("Couldn't allocate memory for compile commands");
-    return clean_exit(EXIT_FAILURE);
-  }
+    compile_commands = malloc(sizeof(char *) * compile_commands_capacity);
+    if (!compile_commands) { perror("malloc"); return clean_exit(EXIT_FAILURE); }
 #endif
 
-  // Compiler string builder
-  struct Sb *compile_sb = string_sb_create(256);
+    struct Sb *compile_sb    = string_sb_create(256);
+    struct Sb *object_files  = string_sb_create(8192);
 
-  // String builder to collect all object file paths for linking
-  struct Sb *object_files_sb = string_sb_create(8192);
+    // walk .c files
+    for (struct dirent *e; (e = readdir(src_dir)); ) {
+        if (e->d_type != DT_REG) continue;
+        const char *dot = strrchr(e->d_name, '.');
+        if (!dot || strcmp(dot, SRC_EXT)) continue;
 
-  while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_type == DT_REG) {
-      const char *dot = strrchr(entry->d_name, '.');
-      if (dot && strcmp(dot, SRC_EXT) == 0) {
-        // Construct full source file
+        size_t base_len = dot - e->d_name;
         string_sb_clear(compile_sb);
-        string_sb_append_f(compile_sb, "%s/%s", SRC_DIR, entry->d_name);
-        char *source_path = string_sb_copy(compile_sb);
+        string_sb_append_f(compile_sb, "%.*s", (int)base_len, e->d_name);
+        char *base = string_sb_copy(compile_sb);
 
-        // Extract base name without extension
         string_sb_clear(compile_sb);
-        size_t base_len = dot - entry->d_name;
-        string_sb_append_f(compile_sb, "%.*s", (int)base_len, entry->d_name);
-        char *base_name = string_sb_copy(compile_sb);
+        string_sb_append_f(compile_sb, "%s/%s", SRC_DIR, e->d_name);
+        char *src_path = string_sb_copy(compile_sb);
 
-        // Construct corresponding object file path
         string_sb_clear(compile_sb);
-        string_sb_append_f(compile_sb, "%s/%s.o", OBJ_DIR, base_name);
-        char *object_path = string_sb_copy(compile_sb);
+        string_sb_append_f(compile_sb, "%s/%s.o", OBJ_DIR, base);
+        char *obj_path = string_sb_copy(compile_sb);
 
-        // Compile the source file into object file
         string_sb_clear(compile_sb);
-        string_sb_append_f(compile_sb, "%s %s %s -c %s -o %s", COMPILER, CFLAGS,
-                           INCLUDE, source_path, object_path);
+        string_sb_append_f(compile_sb, "%s/%s.d", OBJ_DIR, base);
+        char *dep_path = string_sb_copy(compile_sb);
+
+        string_sb_clear(compile_sb);
+        string_sb_append_f(
+            compile_sb,
+            "%s %s %s -MMD -MP -MF %s -c %s -o %s",
+            COMPILER, CFLAGS, INCLUDE, dep_path, src_path, obj_path
+        );
         char *compile_cmd = string_sb_copy(compile_sb);
 
-        // Check if recompilation is needed
-        if (file_newer(source_path, object_path)) {
-
-          printf("Compiling: %s\n", compile_cmd);
-          if (system(compile_cmd) != 0) {
-            fprintf(stderr, "Compilation failed for %s\n", source_path);
-            closedir(dir);
-            return clean_exit(EXIT_FAILURE);
-          }
-
+        if (needs_rebuild(obj_path, dep_path)) {
+            printf("Compiling: %s\n", compile_cmd);
+            if (system(compile_cmd)) {
+                fprintf(stderr, "Compilation failed: %s\n", src_path);
+                closedir(src_dir);
+                return clean_exit(EXIT_FAILURE);
+            }
         } else {
-          printf("Skipping (up-to-date): %s\n", source_path);
-        }
-#if EXPORT_COMPILE_COMMANDS
-        if (compile_commands_count >= compile_commands_capacity) {
-          compile_commands_capacity *= 2;
-          char **temp = realloc(compile_commands,
-                                sizeof(char *) * compile_commands_capacity);
-          if (!temp) {
-            perror("Couldn't grow compile commands array");
-            return clean_exit(EXIT_FAILURE);
-          }
-          compile_commands = temp;
+            printf("Skipping (up-to-date): %s\n", src_path);
         }
 
+#if EXPORT_COMPILE_COMMANDS
+        if (compile_commands_count == compile_commands_capacity) {
+            compile_commands_capacity *= 2;
+            void *t = realloc(compile_commands,
+                              compile_commands_capacity * sizeof(char *));
+            if (!t) { perror("realloc"); return clean_exit(EXIT_FAILURE); }
+            compile_commands = t;
+        }
         compile_commands[compile_commands_count++] = compile_cmd;
-
 #endif
-        // Append the object file path to the object_files string
-        string_sb_append_f(object_files_sb, "%s ", object_path);
-      }
+        string_sb_append_f(object_files, "%s ", obj_path);
     }
-  }
-  closedir(dir);
+    closedir(src_dir);
 
 #if EXPORT_COMPILE_COMMANDS
-  // Write compile_commands.json
-  write_compile_commands();
+    write_compile_commands();
 #endif
 
-  // Construct the linking command.
-  // Use the compiler cmd builder
-  string_sb_clear(compile_sb);
-  string_sb_append_f(compile_sb, "%s %s -o %s %s %s %s", LINKER,
-                     string_sb_get(object_files_sb), target_binary, LIB_FLAGS,
-                     LD_FLAGS, R_PATH);
-  char *link_cmd = string_sb_copy(compile_sb);
+    string_sb_clear(compile_sb);
+    string_sb_append_f(compile_sb, "%s %s -o %s %s %s %s",
+                       LINKER,
+                       string_sb_get(object_files),
+                       target_binary,
+                       LIB_FLAGS, LD_FLAGS, R_PATH);
+    char *link_cmd = string_sb_copy(compile_sb);
 
-  printf("Linking: %s\n", link_cmd);
-  if (system(link_cmd) != 0) {
-    fprintf(stderr, "Linking failed\n");
-    return clean_exit(EXIT_FAILURE);
-  }
+    printf("Linking: %s\n", link_cmd);
+    if (system(link_cmd)) { fprintf(stderr, "Link failed\n"); return clean_exit(EXIT_FAILURE); }
 
-  printf("Copying libraries: %s\n", LIB_COPY_CMD);
-  if (try_copy_all_library_files() == EXIT_FAILURE) {
-    fprintf(stderr, "Some or all library files could not be copied)");
-  }
+    puts("Copying libraries …");
+    try_copy_all_library_files();
 
-  printf("Success: Executable created at %s\n", target_binary);
+    printf("Success: executable at %s\n", target_binary);
 
-  // Clean up our allocations
-  clean_exit(0);
+    if (!run) return clean_exit(EXIT_SUCCESS);
 
-  // If we're not running, then just clean up and return
-  if (!run) {
-    return EXIT_SUCCESS;
-  }
-
-  // This will run the binary. Clean up the sb manually.
-  struct Sb *sb_run = string_sb_create(16);
-  string_sb_append_f(sb_run, "%s%s%s", RUN_CMD_PREFIX, target_binary,
-                     RUN_CMD_SUFFIX);
-  char *run_cmd = string_sb_copy(sb_run);
-  string_sb_free(&sb_run);
-  printf("Executing: %s\n--- RUN OUTPUT ---\n", run_cmd);
-  if (system(run_cmd) != 0) {
-    fprintf(stderr, "Execution failed for %s\n", target_binary);
-    return EXIT_FAILURE;
-  }
-
-  return EXIT_SUCCESS;
+    struct Sb *run_sb = string_sb_create(64);
+    string_sb_append_f(run_sb, "%s%s%s", RUN_CMD_PREFIX, target_binary, RUN_CMD_SUFFIX);
+    char *run_cmd = string_sb_copy(run_sb);
+    printf("Executing: %s\n--- RUN OUTPUT ---\n", run_cmd);
+    int rc = system(run_cmd);
+    return rc ? EXIT_FAILURE : EXIT_SUCCESS;
 }
+
+int needs_rebuild(const char *obj, const char *dep)
+{
+    struct stat obj_st;
+    if (stat(obj, &obj_st))
+        return 1;
+
+    struct stat dep_st;
+    if (stat(dep, &dep_st))
+        return 1;
+
+    if (obj_st.st_mtime > dep_st.st_mtime)
+        return 0;
+
+    FILE *fp = fopen(dep, "r");
+    if (!fp) return 1;
+
+    char tok[PATH_MAX];
+    int  first = 1;
+    while (fscanf(fp, "%1023s", tok) == 1) {
+        if (first) { first = 0; char *c = strchr(tok, ':'); if (!c) continue;
+                      if (*(++c) == '\0') continue; memmove(tok, c, strlen(c)+1); }
+        size_t len = strlen(tok);
+        if (len && tok[len-1] == '\\') { tok[len-1] = '\0'; if (!*tok) continue; }
+
+        struct stat hd;
+        if (stat(tok, &hd) == 0 && hd.st_mtime > obj_st.st_mtime) {
+            fclose(fp);
+            return 1;  
+        }
+    }
+    fclose(fp);
+    return 0; 
+}
+
 
 int file_newer(char *a_file, char *b_file) {
   struct stat a_file_buffer;
